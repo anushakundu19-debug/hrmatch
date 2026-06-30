@@ -37,10 +37,14 @@ def extract_text(pdf_bytes: bytes) -> str:
 
 
 def get_client() -> Groq:
-    api_key = os.getenv("GROQ_API_KEY") or st.session_state.get("groq_api_key", "")
-    if not api_key or api_key.startswith("your_"):
+    api_key = (
+        st.secrets.get("GROQ_API_KEY")
+        or os.getenv("GROQ_API_KEY")
+        or st.session_state.get("groq_api_key", "")
+    )
+    if not api_key:
         raise ValueError(
-            "Missing GROQ_API_KEY. Set it in your shell, in a .env file, or in the app secrets for deployment."
+            "Missing GROQ_API_KEY. Set it in Streamlit secrets, your shell, or a .env file."
         )
     return Groq(api_key=api_key)
 
