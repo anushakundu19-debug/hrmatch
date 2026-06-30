@@ -211,7 +211,6 @@ Schema:
       "issuing_body": "Organization issuing the cert (e.g., 'Society for Human Resource Management')",
       "skill_addressed": "which skill this certifies",
       "duration": "how long typically takes to complete",
-      "cost_estimate": "estimated cost range",
       "priority": "high/medium/low",
       "why_important": "why this specific certification helps the role"
     }}
@@ -224,7 +223,6 @@ Schema:
       "duration": "estimated duration",
       "difficulty_level": "beginner/intermediate/advanced",
       "cost": "free/paid/subscription",
-      "estimated_price": "price range if paid",
       "why_relevant": "relevance to the job"
     }}
   ],
@@ -239,8 +237,7 @@ Schema:
   ],
   "learning_sequence": "suggested order to tackle certifications and courses",
   "estimated_total_timeline": "approximate total time to reach proficiency",
-  "quick_wins": ["achievable certifications/skills in 1-3 months"],
-  "budget_estimate": "estimated total cost for all recommendations"
+  "quick_wins": ["achievable certifications/skills in 1-3 months"]
 }}
 """
     result = call_llm(prompt)
@@ -451,7 +448,6 @@ if st.button("Analyze Resumes"):
                     
                     st.write(f"**Estimated Total Timeline:** {training_recs.get('estimated_total_timeline', 'N/A')}")
                     st.write(f"**Learning Sequence:** {training_recs.get('learning_sequence', 'N/A')}")
-                    st.write(f"**Budget Estimate:** {training_recs.get('budget_estimate', 'N/A')}")
                     
                     st.write("**Quick Wins (Achievable in 1-3 months):**")
                     for win in training_recs.get("quick_wins", []):
@@ -465,7 +461,6 @@ if st.button("Analyze Resumes"):
                             st.write(f"  - Issuing Body: {cert.get('issuing_body', 'N/A')}")
                             st.write(f"  - Skill Addressed: {cert.get('skill_addressed', 'N/A')}")
                             st.write(f"  - Duration: {cert.get('duration', 'N/A')}")
-                            st.write(f"  - Estimated Cost: {cert.get('cost_estimate', 'N/A')}")
                             st.write(f"  - Priority: {cert.get('priority', 'N/A')}")
                             st.write(f"  - Why Important: {cert.get('why_important', 'N/A')}")
                     
@@ -478,7 +473,7 @@ if st.button("Analyze Resumes"):
                             st.write(f"  - Skill: {course.get('skill', 'N/A')}")
                             st.write(f"  - Duration: {course.get('duration', 'N/A')}")
                             st.write(f"  - Level: {course.get('difficulty_level', 'N/A')}")
-                            st.write(f"  - Cost: {course.get('cost', 'N/A')} {course.get('estimated_price', '')}")
+                            st.write(f"  - Cost: {course.get('cost', 'N/A')}")
                             st.write(f"  - Why Relevant: {course.get('why_relevant', 'N/A')}")
                     
                     st.write("**Recommended Projects:**")
