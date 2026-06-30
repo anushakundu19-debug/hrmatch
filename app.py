@@ -155,7 +155,6 @@ with st.sidebar:
     )
     if api_key_input:
         os.environ["GROQ_API_KEY"] = api_key_input
-        st.session_state["groq_api_key"] = api_key_input
 
     st.info("The app reads GROQ_API_KEY from the textbox, your shell environment, or a .env file in this workspace.")
 
