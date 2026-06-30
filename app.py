@@ -172,10 +172,10 @@ Schema:
 def generate_training_recommendations(resume: Dict, jd: Dict, comparison: Dict) -> Dict:
     """
     Generate personalized training and project recommendations for the candidate
-    based on the gap analysis between their resume and the job requirements.
+    with specific certification names and course recommendations.
     """
     prompt = f"""
-You are a Career Development Coach specializing in personalized learning paths.
+You are a Career Development Coach specializing in personalized learning paths and industry certifications.
 
 Candidate Profile:
 {json.dumps(resume, indent=2)}
@@ -188,18 +188,44 @@ Gap Analysis:
 - Areas for Improvement: {json.dumps(comparison.get('areas_for_improvement', []))}
 - Current Match Score: {comparison.get('match_score', 0)}%
 
-Based on the gaps identified, create a personalized development plan.
-Return ONLY valid JSON with specific, actionable recommendations.
+Based on the gaps identified, create a personalized development plan with REAL, SPECIFIC certifications and courses.
+Include actual certification names, recognized credentials, and well-known platforms.
+
+For certifications, include recognized credentials like:
+- HR certifications: SHRM-CP, SHRM-SCP, PHR, CIPD, IHRP
+- Project Management: PMP, CAPM, PRINCE2
+- Analytics: Google Analytics, Microsoft Certifications, Tableau Desktop Specialist
+- Leadership: CCP (Center for Creative Leadership), EY Future Consumer Index Certification
+- Compliance: GDPR certification, SOC 2 fundamentals
+- Technical: AWS, Azure, Google Cloud certifications (if applicable)
+
+For courses, recommend platforms like: Coursera, Udemy, LinkedIn Learning, edX, SHRM Learning, HR.com, Pluralsight
+
+Return ONLY valid JSON with SPECIFIC, REAL certifications and course names:
 
 Schema:
 {{
-  "training_courses": [
+  "certifications": [
     {{
-      "skill": "skill name",
-      "course_type": "online/certification/degree/workshop",
-      "duration": "estimated duration",
+      "certification_name": "Official certification name (e.g., 'SHRM-CP Certification')",
+      "issuing_body": "Organization issuing the cert (e.g., 'Society for Human Resource Management')",
+      "skill_addressed": "which skill this certifies",
+      "duration": "how long typically takes to complete",
+      "cost_estimate": "estimated cost range",
       "priority": "high/medium/low",
-      "description": "why this is important for the role"
+      "why_important": "why this specific certification helps the role"
+    }}
+  ],
+  "recommended_courses": [
+    {{
+      "course_name": "Exact course name from platform",
+      "platform": "Coursera/Udemy/LinkedIn Learning/etc",
+      "skill": "skill addressed",
+      "duration": "estimated duration",
+      "difficulty_level": "beginner/intermediate/advanced",
+      "cost": "free/paid/subscription",
+      "estimated_price": "price range if paid",
+      "why_relevant": "relevance to the job"
     }}
   ],
   "project_recommendations": [
@@ -211,9 +237,10 @@ Schema:
       "business_value": "how this helps the role"
     }}
   ],
-  "learning_sequence": "suggested order to tackle these",
-  "estimated_timeline": "approximate time to reach proficiency",
-  "quick_wins": ["achievable goals in 1-3 months"]
+  "learning_sequence": "suggested order to tackle certifications and courses",
+  "estimated_total_timeline": "approximate total time to reach proficiency",
+  "quick_wins": ["achievable certifications/skills in 1-3 months"],
+  "budget_estimate": "estimated total cost for all recommendations"
 }}
 """
     result = call_llm(prompt)
@@ -312,7 +339,7 @@ if st.button("Analyze Resumes"):
                     # Generate insights for HR recruiters
                     recruiter_insights = generate_recruiter_insights(resume, jd, comparison, synonym_analysis)
                     
-                    # Generate recommendations for candidates
+                    # Generate recommendations for candidates (now with specific certs)
                     training_recommendations = generate_training_recommendations(resume, jd, comparison)
 
                     results.append(
@@ -422,21 +449,37 @@ if st.button("Analyze Resumes"):
                     st.subheader("🎓 Personalized Training & Development Plan")
                     training_recs = row["training_recommendations"]
                     
-                    st.write(f"**Estimated Timeline to Proficiency:** {training_recs.get('estimated_timeline', 'N/A')}")
+                    st.write(f"**Estimated Total Timeline:** {training_recs.get('estimated_total_timeline', 'N/A')}")
                     st.write(f"**Learning Sequence:** {training_recs.get('learning_sequence', 'N/A')}")
+                    st.write(f"**Budget Estimate:** {training_recs.get('budget_estimate', 'N/A')}")
                     
                     st.write("**Quick Wins (Achievable in 1-3 months):**")
                     for win in training_recs.get("quick_wins", []):
                         st.write(f"✓ {win}")
                     
-                    st.write("**Recommended Training Courses:**")
-                    for course in training_recs.get("training_courses", []):
+                    # Certifications Section
+                    st.write("**🏆 Recommended Certifications:**")
+                    for cert in training_recs.get("certifications", []):
                         with st.container():
-                            st.write(f"🎯 **{course.get('skill', 'N/A')}**")
-                            st.write(f"  - Type: {course.get('course_type', 'N/A')}")
+                            st.write(f"**{cert.get('certification_name', 'N/A')}**")
+                            st.write(f"  - Issuing Body: {cert.get('issuing_body', 'N/A')}")
+                            st.write(f"  - Skill Addressed: {cert.get('skill_addressed', 'N/A')}")
+                            st.write(f"  - Duration: {cert.get('duration', 'N/A')}")
+                            st.write(f"  - Estimated Cost: {cert.get('cost_estimate', 'N/A')}")
+                            st.write(f"  - Priority: {cert.get('priority', 'N/A')}")
+                            st.write(f"  - Why Important: {cert.get('why_important', 'N/A')}")
+                    
+                    # Recommended Courses Section
+                    st.write("**📚 Recommended Courses:**")
+                    for course in training_recs.get("recommended_courses", []):
+                        with st.container():
+                            st.write(f"**{course.get('course_name', 'N/A')}**")
+                            st.write(f"  - Platform: {course.get('platform', 'N/A')}")
+                            st.write(f"  - Skill: {course.get('skill', 'N/A')}")
                             st.write(f"  - Duration: {course.get('duration', 'N/A')}")
-                            st.write(f"  - Priority: {course.get('priority', 'N/A')}")
-                            st.write(f"  - Why: {course.get('description', 'N/A')}")
+                            st.write(f"  - Level: {course.get('difficulty_level', 'N/A')}")
+                            st.write(f"  - Cost: {course.get('cost', 'N/A')} {course.get('estimated_price', '')}")
+                            st.write(f"  - Why Relevant: {course.get('why_relevant', 'N/A')}")
                     
                     st.write("**Recommended Projects:**")
                     for project in training_recs.get("project_recommendations", []):
