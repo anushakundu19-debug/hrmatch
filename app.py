@@ -139,24 +139,9 @@ st.write("Upload multiple PDF resumes at once and compare them to a job descript
 
 with st.sidebar:
     st.header("Settings")
-    st.caption("Add your Groq API key before running the analysis.")
-    st.code("export GROQ_API_KEY=your_key_here", language="bash")
-    st.code("cp .env.example .env\n# then edit .env and add your key", language="bash")
-
-    if "groq_api_key" not in st.session_state:
-        st.session_state["groq_api_key"] = os.getenv("GROQ_API_KEY", "")
-
-    api_key_input = st.text_input(
-        "Groq API key",
-        value=st.session_state["groq_api_key"],
-        type="password",
-        key="groq_api_key",
-        help="The app will reuse the saved key automatically for this session.",
-    )
-    if api_key_input:
-        os.environ["GROQ_API_KEY"] = api_key_input
-
-    st.info("The app reads GROQ_API_KEY from the textbox, your shell environment, or a .env file in this workspace.")
+    st.caption("Groq API key is read from Streamlit secrets for this deployment.")
+    st.code("# To run locally, create a .env file with:\n# GROQ_API_KEY=your_real_key_here", language="bash")
+    st.info("If you deployed on Streamlit Cloud, set GROQ_API_KEY in App Settings → Secrets.")
 
 uploaded_files = st.file_uploader(
     "Upload PDF resumes",
