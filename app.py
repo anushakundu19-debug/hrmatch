@@ -65,194 +65,189 @@ def parse_json_response(raw_response: str) -> Dict:
 
 
 def resume_to_json(text: str) -> Dict:
-    prompt = f"""Extract resume info. Return JSON only.
-Schema: {{"candidate_name":"","education":"","experience_years":0,"current_job_title":"","skills":[]}}
-Resume: {text}"""
+    """Extract resume fields. Ultra-minimal prompt."""
+    prompt = f"""Extract: name, education, experience_years, job_title, skills (5 max). JSON only.
+Resume: {text[:1000]}"""
     result = call_llm(prompt)
     return parse_json_response(result)
 
 
 def job_description_to_json(job_description: str) -> Dict:
-    prompt = f"""Extract JD info. Return JSON only.
-Schema: {{"job_title":"","education_required":"","required_skills":[],"responsibilities":[]}}
-Job Description: {job_description}"""
+    """Extract JD fields. Ultra-minimal prompt."""
+    prompt = f"""Extract: job_title, required_skills (5 max). JSON only.
+JD: {job_description[:800]}"""
     result = call_llm(prompt)
     return parse_json_response(result)
 
 
-def analyze_resume_comprehensive(resume: Dict, jd: Dict) -> Dict:
+def quick_match_analysis(resume: Dict, jd: Dict) -> Dict:
     """
-    COMBINED ANALYSIS: Compare resume, match skills, generate insights, training all in ONE call.
-    Saves ~60% tokens by merging 4 separate analyses into 1.
-    Only call recruiter insights if match_score >= 50%.
+    ULTRA-FAST screening. Returns only match_score.
+    ~200 tokens. Determines if we do deeper analysis.
     """
-    prompt = f"""You are an HR recruiter. Analyze this resume vs JD. Be concise.
+    prompt = f"""Score match 0-100. JSON: {{"match_score": 0}}
+Resume skills: {resume.get('skills', [])}
+JD skills: {jd.get('required_skills', [])}
+Resume title: {resume.get('current_job_title')}
+JD title: {jd.get('job_title')}"""
+    result = call_llm(prompt)
+    return parse_json_response(result)
+
+
+def comprehensive_analysis(resume: Dict, jd: Dict) -> Dict:
+    """
+    DETAILED analysis. Only for match_score >= 40%.
+    Returns: match_score, matching_skills, missing_skills, strengths, synonyms.
+    ~600 tokens.
+    """
+    prompt = f"""Analyze resume vs JD. Concise JSON.
 Resume: {json.dumps(resume)}
 JD: {json.dumps(jd)}
 
-Return JSON only:
-{{
-  "match_score": 0,
-  "matching_skills": [],
-  "missing_skills": [],
-  "synonym_matches": {{"candidate_skill":"jd_skill"}},
-  "strengths": [],
-  "areas_for_improvement": [],
-  "hiring_recommendation": "hire/consider/review/pass"
-}}"""
+{{"match_score": 0, "matching_skills": ["max 5"], "missing_skills": ["max 5"], "synonym_matches": {{"skill":"match"}}, "strengths": ["max 3"]}}"""
     result = call_llm(prompt)
     return parse_json_response(result)
 
 
-def generate_training_recommendations(resume: Dict, jd: Dict, analysis: Dict) -> Dict:
+def generate_minimal_training(missing_skills: List[str]) -> Dict:
     """
-    Generate training with real certifications and courses (token-optimized).
+    Minimal training for <40% match. Just quick paths.
+    ~300 tokens.
     """
-    if analysis.get('match_score', 0) < 30:
+    if not missing_skills:
         return {
             "certifications": [],
-            "recommended_courses": [],
-            "project_recommendations": [],
-            "learning_sequence": "Focus on foundational skills first",
-            "estimated_total_timeline": "6-12 months",
-            "quick_wins": ["Complete online overview courses", "Read industry whitepapers"]
+            "courses": [],
+            "timeline": "Already qualified",
+            "quick_wins": []
         }
     
-    prompt = f"""As career coach, suggest 2-3 certifications and 2-3 courses. Be concise.
-Missing Skills: {json.dumps(analysis.get('missing_skills', [])[:5])}
-Areas to Improve: {json.dumps(analysis.get('areas_for_improvement', [])[:3])}
-Match Score: {analysis.get('match_score', 0)}%
-
-Return JSON with max 3 items per list:
-{{
-  "certifications": [{{"certification_name":"", "issuing_body":"", "skill_addressed":"", "duration":"", "priority":"high/medium/low"}}],
-  "recommended_courses": [{{"course_name":"", "platform":"", "skill":"", "duration":"", "difficulty_level":"beginner/intermediate/advanced", "cost":"free/paid"}}],
-  "project_recommendations": [{{"project_type":"", "skills_gained":[], "complexity":"beginner/intermediate/advanced", "expected_duration":""}}],
-  "learning_sequence": "order to follow",
-  "estimated_total_timeline": "total months",
-  "quick_wins": ["1-3 month achievements"]
-}}"""
+    top_3_skills = missing_skills[:3]
+    prompt = f"""Suggest 1 cert and 1 course for: {json.dumps(top_3_skills)}. Concise JSON.
+{{"certifications": [{{"name":"", "issuing_body":"", "duration":""}}], "courses": [{{"name":"", "platform":"", "duration":""}}], "timeline": "3-6 months", "quick_wins": ["1-2 items"]}}"""
     result = call_llm(prompt)
     return parse_json_response(result)
 
 
-def generate_recruiter_insights(resume: Dict, jd: Dict, analysis: Dict) -> Dict:
+def generate_detailed_training(resume: Dict, jd: Dict, analysis: Dict) -> Dict:
     """
-    Only for high-potential candidates (match_score >= 50%).
+    Detailed training for >= 40% match.
+    ~700 tokens.
     """
-    match_score = analysis.get('match_score', 0)
-    
+    prompt = f"""Career coach. Suggest 2-3 certs and 2-3 courses. Concise JSON.
+Missing skills: {json.dumps(analysis.get('missing_skills', [])[:3])}
+Match: {analysis.get('match_score')}%
+
+{{"certifications": [{{"name":"", "issuing_body":"", "duration":"", "priority":"high/med/low"}}], "courses": [{{"name":"", "platform":"", "duration":"", "cost":"free/paid"}}], "projects": [{{"type":"", "duration":""}}], "timeline": "X-Y months", "quick_wins": ["items"]}}"""
+    result = call_llm(prompt)
+    return parse_json_response(result)
+
+
+def generate_recruiter_insights(analysis: Dict, match_score: int) -> Dict:
+    """
+    Only for >= 50% match. Returns hiring recommendation.
+    ~300 tokens.
+    """
     if match_score < 50:
         return {
-            "synonym_insights": "See skill analysis above",
-            "hidden_qualifications": analysis.get("strengths", []),
-            "transferable_skills": [],
-            "adjusted_match_score": match_score,
-            "semantic_match_summary": f"Score: {match_score}%",
-            "hiring_recommendation": analysis.get("hiring_recommendation", "review_manually"),
-            "ramp_up_timeline": "6-12 months" if match_score >= 30 else "N/A - Major retraining needed",
-            "risk_assessment": "Significant skill gaps. Strong training commitment required.",
-            "interview_focus_areas": ["Why interested in this role?"],
-            "additional_notes": ""
+            "hiring_recommendation": "needs_training" if match_score >= 40 else "pass",
+            "ramp_up_timeline": "6-12 months" if match_score >= 40 else "N/A",
+            "risk_level": "high" if match_score < 40 else "medium"
         }
     
-    prompt = f"""Senior recruiter. Quick insights for match score {match_score}%.
-Resume: {json.dumps(resume)}
-Missing: {json.dumps(analysis.get('missing_skills', [])[:3])}
-Strengths: {json.dumps(analysis.get('strengths', [])[:3])}
-
-Return concise JSON:
-{{
-  "synonym_insights": "key terminology matches",
-  "hidden_qualifications": ["implied skills"],
-  "transferable_skills": ["other applicable skills"],
-  "adjusted_match_score": {match_score},
-  "semantic_match_summary": "brief summary",
-  "hiring_recommendation": "hire/consider/review/pass",
-  "ramp_up_timeline": "weeks/months",
-  "risk_assessment": "brief risk summary",
-  "interview_focus_areas": ["topic1", "topic2"],
-  "additional_notes": ""
-}}"""
+    prompt = f"""Hiring decision for {match_score}% match. JSON: {{"hiring_recommendation":"hire/consider/review/pass", "ramp_up_timeline":"X months", "risk_level":"low/med/high"}}"""
     result = call_llm(prompt)
     return parse_json_response(result)
 
 
 st.set_page_config(page_title="HRMatch", layout="wide")
 st.title("HRMatch Resume Screening")
-st.write("Upload PDFs and compare to job description. **Token-optimized for free tier (100K/day)** 🚀")
+st.write("Fast token-optimized screening. **Ultra-efficient for 100K daily limit** ⚡")
 
 with st.sidebar:
     st.header("⚙️ Settings")
-    st.info("💡 **Token Optimization:** Only generates advanced insights for strong candidates (50%+ match)")
-    st.caption("Groq API key: Streamlit secrets → Shell env → .env file")
+    st.info("🚀 **Ultra-Optimized:**\n- Quick match scan first\n- Detailed analysis only for 40%+ matches\n- Minimal training for weak candidates\n- ~50 resumes/day on 100K limit")
+    st.caption("Groq API key: Streamlit secrets → .env")
 
 uploaded_files = st.file_uploader(
     "Upload PDF resumes",
     type=["pdf"],
     accept_multiple_files=True,
-    help="Select multiple files at once",
 )
-job_description = st.text_area("Job description", value=DEFAULT_JOB_DESCRIPTION, height=200)
+job_description = st.text_area("Job description", value=DEFAULT_JOB_DESCRIPTION, height=180)
 
-if st.button("🔍 Analyze Resumes"):
+if st.button("⚡ Quick Scan"):
     if not uploaded_files:
-        st.error("Upload at least one PDF resume")
+        st.error("Upload at least one PDF")
     elif not job_description.strip():
         st.error("Provide a job description")
     else:
         try:
-            with st.spinner("Analyzing resumes (token-optimized)..."):
+            with st.spinner("Scanning resumes..."):
                 jd = job_description_to_json(job_description)
                 results: List[Dict] = []
+                detailed_needed = []
 
-                for uploaded_file in uploaded_files:
+                # PHASE 1: Quick scan all resumes
+                for idx, uploaded_file in enumerate(uploaded_files):
                     text = extract_text(uploaded_file.getvalue())
                     resume = resume_to_json(text)
+                    quick_score = quick_match_analysis(resume, jd)
                     
-                    # OPTIMIZATION: Single comprehensive analysis call instead of 4-5 separate calls
-                    analysis = analyze_resume_comprehensive(resume, jd)
+                    results.append({
+                        "file_idx": idx,
+                        "candidate_name": resume.get("candidate_name", "Unknown"),
+                        "current_job_title": resume.get("current_job_title", "Unknown"),
+                        "experience_years": resume.get("experience_years", 0),
+                        "education": resume.get("education", "Unknown"),
+                        "match_score": quick_score.get("match_score", 0),
+                        "resume": resume,
+                        "status": "quick_scan_only"
+                    })
                     
-                    # Only generate recruiter insights for candidates with 50%+ match
-                    if analysis.get("match_score", 0) >= 50:
-                        recruiter_insights = generate_recruiter_insights(resume, jd, analysis)
+                    # Mark for detailed analysis if promising
+                    if quick_score.get("match_score", 0) >= 40:
+                        detailed_needed.append(idx)
+
+                # PHASE 2: Detailed analysis only for promising candidates
+                st.info(f"📊 Scanned {len(results)} resumes. Analyzing {len(detailed_needed)} promising candidates...")
+                
+                for file_idx in detailed_needed:
+                    resume = results[file_idx]["resume"]
+                    analysis = comprehensive_analysis(resume, jd)
+                    
+                    # Only generate detailed training for 40%+ match
+                    if analysis.get("match_score", 0) >= 40:
+                        training = generate_detailed_training(resume, jd, analysis)
                     else:
-                        recruiter_insights = generate_recruiter_insights(resume, jd, analysis)
+                        training = generate_minimal_training(analysis.get("missing_skills", []))
                     
-                    # Generate training recommendations
-                    training_recommendations = generate_training_recommendations(resume, jd, analysis)
+                    # Only generate recruiter insights for 50%+ match
+                    recruiter_insights = generate_recruiter_insights(analysis, analysis.get("match_score", 0))
+                    
+                    results[file_idx].update({
+                        "match_score": analysis.get("match_score", 0),
+                        "matching_skills": analysis.get("matching_skills", []),
+                        "missing_skills": analysis.get("missing_skills", []),
+                        "synonym_matches": analysis.get("synonym_matches", {}),
+                        "strengths": analysis.get("strengths", []),
+                        "training": training,
+                        "recruiter_insights": recruiter_insights,
+                        "status": "detailed_analysis"
+                    })
 
-                    results.append(
-                        {
-                            "candidate_name": resume.get("candidate_name", "Unknown"),
-                            "current_job_title": resume.get("current_job_title", "Unknown"),
-                            "experience_years": resume.get("experience_years", 0),
-                            "education": resume.get("education", "Unknown"),
-                            "match_score": analysis.get("match_score", 0),
-                            "adjusted_match_score": recruiter_insights.get("adjusted_match_score", analysis.get("match_score", 0)),
-                            "hiring_recommendation": recruiter_insights.get("hiring_recommendation", "review_manually"),
-                            "matching_skills": analysis.get("matching_skills", []),
-                            "missing_skills": analysis.get("missing_skills", []),
-                            "synonym_matches": analysis.get("synonym_matches", {}),
-                            "strengths": analysis.get("strengths", []),
-                            "hidden_qualifications": recruiter_insights.get("hidden_qualifications", []),
-                            "transferable_skills": recruiter_insights.get("transferable_skills", []),
-                            "training_recommendations": training_recommendations,
-                            "recruiter_insights": recruiter_insights,
-                        }
-                    )
-
-                results_df = pd.DataFrame(results).sort_values(by="adjusted_match_score", ascending=False)
+                results_df = pd.DataFrame(results).sort_values(by="match_score", ascending=False)
 
             st.success("✅ Analysis complete!")
             
-            # Summary table
-            display_df = results_df[["candidate_name", "match_score", "adjusted_match_score", "hiring_recommendation", "experience_years"]].copy()
-            display_df.columns = ["Candidate", "Match %", "Adjusted %", "Recommendation", "Exp (yrs)"]
+            # Summary
+            st.subheader("📋 Quick Results")
+            display_df = results_df[["candidate_name", "match_score", "current_job_title", "experience_years"]].copy()
+            display_df.columns = ["Candidate", "Match %", "Title", "Exp (yrs)"]
             st.dataframe(display_df, use_container_width=True)
             
             # Export
-            export_df = results_df[["candidate_name", "current_job_title", "match_score", "adjusted_match_score", "hiring_recommendation"]].copy()
+            export_df = results_df[["candidate_name", "current_job_title", "match_score", "experience_years"]].copy()
             st.download_button(
                 label="📥 Download CSV",
                 data=export_df.to_csv(index=False).encode("utf-8"),
@@ -261,40 +256,57 @@ if st.button("🔍 Analyze Resumes"):
             )
 
             # Detailed view
-            st.header("📊 Detailed Results")
+            st.header("📊 Candidates")
             for _, row in results_df.iterrows():
-                with st.expander(f"**{row['candidate_name']}** — {row['adjusted_match_score']}% match"):
-                    col1, col2 = st.columns(2)
+                match = row["match_score"]
+                status_emoji = "🟢" if match >= 70 else "🟡" if match >= 40 else "🔴"
+                
+                with st.expander(f"{status_emoji} **{row['candidate_name']}** — {match}% match"):
+                    col1, col2, col3 = st.columns(3)
                     
                     with col1:
-                        st.subheader("📋 Overview")
                         st.write(f"**Title:** {row['current_job_title']}")
-                        st.write(f"**Exp:** {row['experience_years']}y | **Edu:** {row['education']}")
-                        st.write(f"**Score:** {row['match_score']}% → **{row['adjusted_match_score']}%**")
+                        st.write(f"**Exp:** {row['experience_years']}y")
                     
                     with col2:
-                        st.subheader("🎯 Recommendation")
-                        st.write(f"**Action:** {row['hiring_recommendation']}")
-                        st.write(f"**Timeline:** {row['recruiter_insights'].get('ramp_up_timeline', 'N/A')}")
+                        st.write(f"**Match:** {match}%")
+                        st.write(f"**Edu:** {row['education']}")
                     
-                    # Skills
-                    st.subheader("🔧 Skills")
-                    st.write("**Matching:** " + (", ".join(row["matching_skills"][:5]) or "None"))
-                    st.write("**Synonyms:** " + (", ".join([f"{k}→{v}" for k,v in list(row["synonym_matches"].items())[:3]]) or "None"))
-                    st.write("**Missing:** " + (", ".join(row["missing_skills"][:5]) or "None"))
+                    with col3:
+                        if row['status'] == 'detailed_analysis':
+                            rec = row.get('recruiter_insights', {}).get('hiring_recommendation', 'review')
+                            st.write(f"**Action:** {rec}")
+                            st.write(f"**Risk:** {row.get('recruiter_insights', {}).get('risk_level', 'unknown')}")
+                        else:
+                            st.write("⚡ Quick scan")
                     
-                    # Training
-                    if row['training_recommendations'].get('certifications'):
-                        st.subheader("🏆 Top Certifications")
-                        for cert in row['training_recommendations']['certifications'][:2]:
-                            st.write(f"• **{cert.get('certification_name')}** - {cert.get('duration')}")
-                    
-                    if row['training_recommendations'].get('recommended_courses'):
-                        st.subheader("📚 Top Courses")
-                        for course in row['training_recommendations']['recommended_courses'][:2]:
-                            st.write(f"• **{course.get('course_name')}** ({course.get('platform')}) - {course.get('cost')}")
-                    
-                    st.write(f"⏱️ **Timeline:** {row['training_recommendations'].get('estimated_total_timeline')}")
+                    # Show detailed results only if analyzed
+                    if row['status'] == 'detailed_analysis':
+                        st.divider()
+                        
+                        col_skills1, col_skills2 = st.columns(2)
+                        with col_skills1:
+                            st.write("**✅ Matching:**")
+                            for skill in row.get("matching_skills", [])[:3]:
+                                st.write(f"- {skill}")
+                        
+                        with col_skills2:
+                            st.write("**❌ Missing:**")
+                            for skill in row.get("missing_skills", [])[:3]:
+                                st.write(f"- {skill}")
+                        
+                        # Training recommendations
+                        if row.get('training'):
+                            st.divider()
+                            training = row['training']
+                            
+                            if training.get('certifications'):
+                                st.write("**🏆 Cert:** " + (training['certifications'][0].get('name', 'N/A') if training['certifications'] else "N/A"))
+                            
+                            if training.get('courses'):
+                                st.write("**📚 Course:** " + (training['courses'][0].get('name', 'N/A') if training['courses'] else "N/A"))
+                            
+                            st.write(f"⏱️ **Timeline:** {training.get('timeline', 'N/A')}")
 
         except Exception as exc:
-            st.error(f"❌ Analysis failed: {exc}")
+            st.error(f"❌ Error: {str(exc)[:100]}")
