@@ -1,5 +1,7 @@
 import json
 import os
+import re
+import time
 from typing import Dict, List
 
 import fitz
@@ -37,8 +39,13 @@ def extract_text(pdf_bytes: bytes) -> str:
 
 
 def get_client() -> Groq:
+    try:
+        secret_value = st.secrets.get("GROQ_API_KEY")
+    except Exception:
+        secret_value = None
+
     api_key = (
-        st.secrets.get("GROQ_API_KEY")
+        secret_value
         or os.getenv("GROQ_API_KEY")
         or st.session_state.get("groq_api_key", "")
     )
@@ -49,24 +56,95 @@ def get_client() -> Groq:
     return Groq(api_key=api_key)
 
 
-def call_llm(prompt: str, model: str = "llama-3.3-70b-versatile") -> str:
+def call_llm(prompt: str, model: str = "llama-3.3-70b-versatile", max_retries: int = 3) -> str:
     client = get_client()
-    response = client.chat.completions.create(
-        model=model,
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0,
-    )
-    return response.choices[0].message.content
+    
+    for attempt in range(max_retries):
+        try:
+            response = client.chat.completions.create(
+                model=model,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0,
+            )
+            return response.choices[0].message.content
+        except Exception as e:
+            error_str = str(e)
+            # Check for rate limit error (429)
+            if "429" in error_str or "Rate limit" in error_str:
+                if attempt < max_retries - 1:
+                    wait_time = 2 ** attempt  # Exponential backoff: 1s, 2s, 4s
+                    st.warning(f"⏳ Rate limited. Retrying in {wait_time}s... (Attempt {attempt + 1}/{max_retries})")
+                    time.sleep(wait_time)
+                    continue
+                else:
+                    st.error("❌ Rate limit exceeded. Please wait a few minutes and try again.")
+                    raise
+            else:
+                raise
+
+def normalize_match_score(score: float) -> int:
+    """Normalize score to 0-100 range. If it's a decimal (0-1), multiply by 100."""
+    if isinstance(score, str):
+        try:
+            score = float(score)
+        except ValueError:
+            return 0
+    if score < 0:
+        return 0
+    if 0 <= score <= 1:
+        return int(score * 100)
+    if score > 100:
+        return 100
+    return int(score)
 
 
 def parse_json_response(raw_response: str) -> Dict:
-    cleaned = raw_response.replace("```json", "").replace("```", "").strip()
-    return json.loads(cleaned)
+    if not raw_response:
+        return {}
+
+    cleaned = raw_response.strip()
+    cleaned = cleaned.replace("```json", "").replace("```", "").strip()
+
+    if not cleaned:
+        return {}
+
+    try:
+        return json.loads(cleaned)
+    except json.JSONDecodeError:
+        pass
+
+    json_match = re.search(r"\{.*\}", cleaned, flags=re.DOTALL)
+    if json_match:
+        try:
+            return json.loads(json_match.group(0))
+        except json.JSONDecodeError:
+            pass
+
+    score_match = re.search(r"(?:match[_\s-]?score|score)\s*[:=]?\s*(\d+)", cleaned, flags=re.IGNORECASE)
+    if score_match:
+        return {"match_score": int(score_match.group(1))}
+
+    key_value_pairs: Dict[str, object] = {}
+    for line in cleaned.splitlines():
+        if ":" not in line:
+            continue
+        key, value = line.split(":", 1)
+        key = key.strip().strip('"').strip("'")
+        value = value.strip().strip('"').strip("'")
+        try:
+            key_value_pairs[key] = int(value)
+        except ValueError:
+            key_value_pairs[key] = value
+
+    if key_value_pairs:
+        return key_value_pairs
+
+    raise ValueError("Model response was not valid JSON and could not be parsed.")
 
 
 def resume_to_json(text: str) -> Dict:
     """Extract resume fields. Ultra-minimal prompt."""
-    prompt = f"""Extract: name, education, experience_years, job_title, skills (5 max). JSON only.
+    prompt = f"""Extract: candidate_name, education, experience_years, current_job_title, skills (5 max). JSON only.
 Resume: {text[:1000]}"""
     result = call_llm(prompt)
     return parse_json_response(result)
@@ -77,7 +155,10 @@ def job_description_to_json(job_description: str) -> Dict:
     prompt = f"""Extract: job_title, required_skills (5 max). JSON only.
 JD: {job_description[:800]}"""
     result = call_llm(prompt)
-    return parse_json_response(result)
+    parsed = parse_json_response(result)
+    if "job_title" in parsed:
+        parsed["jd_job_title"] = parsed.pop("job_title")
+    return parsed
 
 
 def quick_match_analysis(resume: Dict, jd: Dict) -> Dict:
@@ -85,13 +166,17 @@ def quick_match_analysis(resume: Dict, jd: Dict) -> Dict:
     ULTRA-FAST screening. Returns only match_score.
     ~200 tokens. Determines if we do deeper analysis.
     """
-    prompt = f"""Score match 0-100. JSON: {{"match_score": 0}}
+    prompt = f"""Score match on a scale of 0 to 100. Return ONLY JSON: {{"match_score": NUMBER}}
+Where 0 = no match, 100 = perfect match.
 Resume skills: {resume.get('skills', [])}
 JD skills: {jd.get('required_skills', [])}
 Resume title: {resume.get('current_job_title')}
-JD title: {jd.get('job_title')}"""
+JD title: {jd.get('jd_job_title')}"""
     result = call_llm(prompt)
-    return parse_json_response(result)
+    parsed = parse_json_response(result)
+    if "match_score" in parsed:
+        parsed["match_score"] = normalize_match_score(parsed["match_score"])
+    return parsed
 
 
 def comprehensive_analysis(resume: Dict, jd: Dict) -> Dict:
@@ -100,13 +185,16 @@ def comprehensive_analysis(resume: Dict, jd: Dict) -> Dict:
     Returns: match_score, matching_skills, missing_skills, strengths, synonyms.
     ~600 tokens.
     """
-    prompt = f"""Analyze resume vs JD. Concise JSON.
+    prompt = f"""Analyze resume vs JD. Return match_score as a NUMBER from 0 to 100. Concise JSON.
 Resume: {json.dumps(resume)}
 JD: {json.dumps(jd)}
 
 {{"match_score": 0, "matching_skills": ["max 5"], "missing_skills": ["max 5"], "synonym_matches": {{"skill":"match"}}, "strengths": ["max 3"]}}"""
     result = call_llm(prompt)
-    return parse_json_response(result)
+    parsed = parse_json_response(result)
+    if "match_score" in parsed:
+        parsed["match_score"] = normalize_match_score(parsed["match_score"])
+    return parsed
 
 
 def generate_minimal_training(missing_skills: List[str]) -> Dict:
@@ -226,7 +314,7 @@ if st.button("⚡ Quick Scan"):
                     recruiter_insights = generate_recruiter_insights(analysis, analysis.get("match_score", 0))
                     
                     results[file_idx].update({
-                        "match_score": analysis.get("match_score", 0),
+                        "comprehensive_score": analysis.get("match_score", 0),
                         "matching_skills": analysis.get("matching_skills", []),
                         "missing_skills": analysis.get("missing_skills", []),
                         "synonym_matches": analysis.get("synonym_matches", {}),
@@ -236,7 +324,14 @@ if st.button("⚡ Quick Scan"):
                         "status": "detailed_analysis"
                     })
 
-                results_df = pd.DataFrame(results).sort_values(by="match_score", ascending=False)
+                results_df = pd.DataFrame(results)
+                results_df["ranking_score"] = results_df.apply(
+                    lambda row: row.get("comprehensive_score", row["match_score"]) 
+                    if row["status"] == "detailed_analysis" 
+                    else row["match_score"],
+                    axis=1
+                )
+                results_df = results_df.sort_values(by="ranking_score", ascending=False)
 
             st.success("✅ Analysis complete!")
             
@@ -244,6 +339,14 @@ if st.button("⚡ Quick Scan"):
             st.subheader("📋 Quick Results")
             display_df = results_df[["candidate_name", "match_score", "current_job_title", "experience_years"]].copy()
             display_df.columns = ["Candidate", "Match %", "Title", "Exp (yrs)"]
+            
+            # Show comprehensive score if detailed analysis was done
+            display_df["Match %"] = display_df.index.map(
+                lambda idx: results_df.loc[idx, "comprehensive_score"] 
+                if results_df.loc[idx, "status"] == "detailed_analysis" 
+                else results_df.loc[idx, "match_score"]
+            )
+            display_df["Match %"] = display_df["Match %"].apply(lambda x: f"{int(x)}%")
             st.dataframe(display_df, use_container_width=True)
             
             # Export
@@ -258,10 +361,12 @@ if st.button("⚡ Quick Scan"):
             # Detailed view
             st.header("📊 Candidates")
             for _, row in results_df.iterrows():
-                match = row["match_score"]
-                status_emoji = "🟢" if match >= 70 else "🟡" if match >= 40 else "🔴"
+                quick_match = row["match_score"]
+                comprehensive_match = row.get("comprehensive_score", quick_match)
+                display_match = comprehensive_match if row['status'] == 'detailed_analysis' else quick_match
+                status_emoji = "🟢" if display_match >= 70 else "🟡" if display_match >= 40 else "🔴"
                 
-                with st.expander(f"{status_emoji} **{row['candidate_name']}** — {match}% match"):
+                with st.expander(f"{status_emoji} **{row['candidate_name']}** — {int(display_match)}% match"):
                     col1, col2, col3 = st.columns(3)
                     
                     with col1:
@@ -269,7 +374,11 @@ if st.button("⚡ Quick Scan"):
                         st.write(f"**Exp:** {row['experience_years']}y")
                     
                     with col2:
-                        st.write(f"**Match:** {match}%")
+                        if row['status'] == 'detailed_analysis':
+                            st.write(f"**Quick Score:** {quick_match}%")
+                            st.write(f"**Detailed Score:** {comprehensive_match}%")
+                        else:
+                            st.write(f"**Match:** {quick_match}%")
                         st.write(f"**Edu:** {row['education']}")
                     
                     with col3:
@@ -309,4 +418,11 @@ if st.button("⚡ Quick Scan"):
                             st.write(f"⏱️ **Timeline:** {training.get('timeline', 'N/A')}")
 
         except Exception as exc:
-            st.error(f"❌ Error: {str(exc)[:100]}")
+            error_msg = str(exc)
+            if "429" in error_msg or "Rate limit" in error_msg:
+                st.error(
+                    "❌ **Rate limit reached.** The Groq API has temporarily limited requests. "
+                    "Please wait a few minutes and try again with fewer resumes at once."
+                )
+            else:
+                st.error(f"❌ Error: {error_msg[:150]}")

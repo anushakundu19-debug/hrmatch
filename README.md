@@ -35,21 +35,35 @@ HR AI Portfolio project for screening resumes with Python, Streamlit, and Groq.
 
 ## Publish as an app
 
-The easiest options are:
+### **Streamlit Community Cloud (Recommended - Easiest)** ⚡
 
-1. Streamlit Community Cloud
-   - Push this repo to GitHub
-   - Open Streamlit Community Cloud
-   - Select the repository and the app entrypoint as app.py
-   - Add the environment variable GROQ_API_KEY in the app settings
+1. **Commit and push your code to GitHub:**
+   ```bash
+   git add .
+   git commit -m "Ready for deployment"
+   git push origin main
+   ```
 
-2. Render
+2. **Go to [share.streamlit.io](https://share.streamlit.io)**
+
+3. **Sign in with GitHub** and authorize Streamlit
+
+4. **Click "Create app" and:**
+   - Select your repo: `anushakundu19-debug/hrmatch`
+   - Branch: `main`
+   - Main file path: `app.py`
+
+5. **Add the environment variable:**
+   - In the app settings (gear icon)
+   - Go to **Secrets**
+   - Paste your secret:
+     ```
+     GROQ_API_KEY = "your_groq_api_key_here"
+     ```
+
+6. **Deploy!** The app will be live at: `https://hrmatch-<random-name>.streamlit.app`
+
+### Render (Alternative)
    - Connect the GitHub repo to Render
    - Use the existing Procfile and requirements.txt
    - Set GROQ_API_KEY as an environment variable in Render
-
-3. Railway or Hugging Face Spaces
-   - Use the same Python app structure
-   - Set GROQ_API_KEY as an environment variable
-
-Important: the app needs a valid GROQ_API_KEY to analyze resumes.
