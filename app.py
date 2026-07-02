@@ -143,16 +143,17 @@ def parse_json_response(raw_response: str) -> Dict:
 
 
 def resume_to_json(text: str) -> Dict:
-    """Extract resume fields including company and industry exposure."""
-    prompt = f"""Extract from resume: candidate_name, education, experience_years, current_job_title, current_company, previous_companies (list 2-3 most recent), skills (5 max). JSON only.
+    """Extract resume fields including company history for domain expertise."""
+    prompt = f"""Extract: candidate_name, education, experience_years, current_job_title, current_company_name, previous_company_names (list 2-3), company_industries_worked_in, skills (5 max). JSON only.
+For company_industries_worked_in, identify the industries (e.g., logistics, FMCG, fintech, manufacturing, healthcare, etc).
 Resume: {text[:1000]}"""
     result = call_llm(prompt)
     return parse_json_response(result)
 
 
 def job_description_to_json(job_description: str) -> Dict:
-    """Extract JD fields. Ultra-minimal prompt."""
-    prompt = f"""Extract: job_title, required_skills (5 max). JSON only.
+    """Extract JD fields including target industry domain."""
+    prompt = f"""Extract: job_title, required_skills (5 max), industry_domain (e.g. logistics, FMCG, fintech, manufacturing, healthcare, etc). JSON only.
 JD: {job_description[:800]}"""
     result = call_llm(prompt)
     parsed = parse_json_response(result)
@@ -166,35 +167,28 @@ def quick_match_analysis(resume: Dict, jd: Dict) -> Dict:
     ULTRA-FAST screening. Returns only match_score.
     ~200 tokens. Determines if we do deeper analysis.
     """
-    company_history = ""
-    if resume.get("current_company"):
-        company_history += f"Current: {resume.get('current_company')}. "
-    if resume.get("previous_companies"):
-        company_history += f"Previous: {', '.join(resume.get('previous_companies', []))}."
-    
     prompt = f"""Score resume match on a scale of 0 to 100. Return ONLY JSON: {{"match_score": NUMBER}}
 
-Scoring guide:
-- 80-100: Direct match in role/skills. Ready to hire.
-- 60-79: Good fit. Has most required skills or strong related experience. Trainable.
-- 40-59: Moderate fit. Some relevant skills/experience. Would need training.
-- 20-39: Weak fit. Different field but has transferable skills.
-- 0-19: No relevant background.
+CRITICAL: Domain-Specific HR Expertise
+HR practices differ significantly across industries (logistics ≠ FMCG ≠ fintech ≠ manufacturing ≠ healthcare)
+- If candidate has HR experience in TARGET INDUSTRY: MAJOR ADVANTAGE (boost score by 15-20 points)
+- If candidate has HR experience in adjacent industry with similar challenges: MODERATE ADVANTAGE (boost 5-10 points)
+- Generic HR skills without domain expertise: Standard scoring
 
-Consider:
-- Transferable skills (management, communication, problem-solving apply across roles)
-- Years of experience in related domains
-- Industry exposure from current/previous companies (tech/finance/HR/retail/manufacturing/etc)
-- Soft skills like leadership, organization, people management
-- Education and certifications
+Scoring guide:
+- 80-100: Direct match in role/skills + SAME industry domain expertise. Ready to hire.
+- 60-79: Good fit. Required skills + Related industry exposure. Trainable in domain specifics.
+- 40-59: Moderate fit. HR skills present. Different industry but has transferable HR knowledge.
+- 20-39: Weak fit. Generic HR skills. No industry alignment.
+- 0-19: No relevant HR background.
 
 Resume Skills: {resume.get('skills', [])}
 Resume Experience: {resume.get('experience_years', 0)} years as {resume.get('current_job_title')}
-Company Background: {company_history}
-Resume Education: {resume.get('education')}
+Industries Worked In: {resume.get('company_industries_worked_in', [])}
 
-Required Skills: {jd.get('required_skills', [])}
-Target Role: {jd.get('jd_job_title')}"""
+Target Role: {jd.get('jd_job_title')}
+Target Industry: {jd.get('industry_domain', 'Not specified')}
+Required Skills: {jd.get('required_skills', [])}"""
     result = call_llm(prompt)
     parsed = parse_json_response(result)
     if "match_score" in parsed:
@@ -208,36 +202,36 @@ def comprehensive_analysis(resume: Dict, jd: Dict) -> Dict:
     Returns: match_score, matching_skills, missing_skills, strengths, synonyms.
     ~600 tokens.
     """
-    company_history = ""
-    if resume.get("current_company"):
-        company_history += f"Currently at: {resume.get('current_company')}. "
-    if resume.get("previous_companies"):
-        company_history += f"Previously worked at: {', '.join(resume.get('previous_companies', []))}."
-    
-    prompt = f"""Analyze resume vs job description. Consider industry exposure from company background. Be fair in scoring. Return JSON with match_score (0-100).
+    prompt = f"""Analyze HR role candidate vs job description. Return JSON with match_score (0-100). Be fair but recognize domain expertise value.
+
+DOMAIN EXPERTISE IS KEY FOR HR ROLES:
+- HR in logistics ≠ HR in FMCG ≠ HR in fintech ≠ HR in manufacturing ≠ HR in healthcare
+- Candidate's industries: {resume.get('company_industries_worked_in', [])}
+- Target industry: {jd.get('industry_domain', 'Not specified')}
+- Perfect industry match (same domain) = potential 20+ point boost
+- Related domain (similar HR challenges) = 10+ point boost
+- Different domain = standard HR skills evaluation
 
 Scoring Rubric:
-- 80-100: Excellent fit. Has most/all required skills. Direct experience match. Strong industry alignment.
-- 60-79: Strong fit. Has key skills. Some gaps but easily trainable. Related industry exposure.
-- 40-59: Fair fit. Foundational skills present. Can learn on the job. Some relevant industry background.
-- 20-39: Possible fit. Transferable skills from other domain.
-- 0-19: Poor fit. No relevant background.
+- 80-100: Excellent fit. Relevant HR skills + SAME industry domain expertise. Understands industry-specific HR challenges.
+- 60-79: Strong fit. HR skills + related/adjacent industry experience. Can quickly apply domain knowledge.
+- 40-59: Fair fit. Solid HR foundation. Different industry but transferable HR practices.
+- 20-39: Possible fit. Some HR experience. Limited domain alignment.
+- 0-19: Poor fit. Insufficient HR background.
 
-Consider both hard skills AND industry exposure from company history.
-
-Resume Summary:
+Candidate Summary:
 - Title: {resume.get('current_job_title')}
 - Experience: {resume.get('experience_years')} years
-- Company Background: {company_history}
-- Education: {resume.get('education')}
+- Industries: {resume.get('company_industries_worked_in', [])}
 - Skills: {resume.get('skills', [])}
 
-Job Description:
-- Role: {jd.get('jd_job_title')}
+Target Role:
+- Position: {jd.get('jd_job_title')}
+- Industry: {jd.get('industry_domain', 'Not specified')}
 - Required Skills: {jd.get('required_skills', [])}
 
 Return ONLY valid JSON:
-{{"match_score": NUMBER, "matching_skills": ["list 3-5 matched skills"], "missing_skills": ["list 2-3 gaps"], "synonym_matches": {{"resume_skill":"matches_jd_skill"}}, "strengths": ["2-3 relevant strengths including industry expertise if applicable"]}}"""
+{{"match_score": NUMBER, "matching_skills": ["3-5 matched skills"], "missing_skills": ["2-3 gaps"], "synonym_matches": {{}}, "strengths": ["note domain expertise if applicable"]}}"""
     result = call_llm(prompt)
     parsed = parse_json_response(result)
     if "match_score" in parsed:
