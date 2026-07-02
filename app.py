@@ -143,8 +143,8 @@ def parse_json_response(raw_response: str) -> Dict:
 
 
 def resume_to_json(text: str) -> Dict:
-    """Extract resume fields. Ultra-minimal prompt."""
-    prompt = f"""Extract: candidate_name, education, experience_years, current_job_title, skills (5 max). JSON only.
+    """Extract resume fields including company and industry exposure."""
+    prompt = f"""Extract from resume: candidate_name, education, experience_years, current_job_title, current_company, previous_companies (list 2-3 most recent), skills (5 max). JSON only.
 Resume: {text[:1000]}"""
     result = call_llm(prompt)
     return parse_json_response(result)
@@ -166,6 +166,12 @@ def quick_match_analysis(resume: Dict, jd: Dict) -> Dict:
     ULTRA-FAST screening. Returns only match_score.
     ~200 tokens. Determines if we do deeper analysis.
     """
+    company_history = ""
+    if resume.get("current_company"):
+        company_history += f"Current: {resume.get('current_company')}. "
+    if resume.get("previous_companies"):
+        company_history += f"Previous: {', '.join(resume.get('previous_companies', []))}."
+    
     prompt = f"""Score resume match on a scale of 0 to 100. Return ONLY JSON: {{"match_score": NUMBER}}
 
 Scoring guide:
@@ -178,11 +184,13 @@ Scoring guide:
 Consider:
 - Transferable skills (management, communication, problem-solving apply across roles)
 - Years of experience in related domains
+- Industry exposure from current/previous companies (tech/finance/HR/retail/manufacturing/etc)
 - Soft skills like leadership, organization, people management
 - Education and certifications
 
 Resume Skills: {resume.get('skills', [])}
 Resume Experience: {resume.get('experience_years', 0)} years as {resume.get('current_job_title')}
+Company Background: {company_history}
 Resume Education: {resume.get('education')}
 
 Required Skills: {jd.get('required_skills', [])}
@@ -200,22 +208,36 @@ def comprehensive_analysis(resume: Dict, jd: Dict) -> Dict:
     Returns: match_score, matching_skills, missing_skills, strengths, synonyms.
     ~600 tokens.
     """
-    prompt = f"""Analyze resume vs job description. Be fair in scoring. Return JSON with match_score (0-100).
+    company_history = ""
+    if resume.get("current_company"):
+        company_history += f"Currently at: {resume.get('current_company')}. "
+    if resume.get("previous_companies"):
+        company_history += f"Previously worked at: {', '.join(resume.get('previous_companies', []))}."
+    
+    prompt = f"""Analyze resume vs job description. Consider industry exposure from company background. Be fair in scoring. Return JSON with match_score (0-100).
 
 Scoring Rubric:
-- 80-100: Excellent fit. Has most/all required skills. Direct experience match.
-- 60-79: Strong fit. Has key skills. Some gaps but easily trainable.
-- 40-59: Fair fit. Foundational skills present. Can learn on the job.
+- 80-100: Excellent fit. Has most/all required skills. Direct experience match. Strong industry alignment.
+- 60-79: Strong fit. Has key skills. Some gaps but easily trainable. Related industry exposure.
+- 40-59: Fair fit. Foundational skills present. Can learn on the job. Some relevant industry background.
 - 20-39: Possible fit. Transferable skills from other domain.
 - 0-19: Poor fit. No relevant background.
 
-For each score tier, explain matching skills and gaps honestly but fairly.
+Consider both hard skills AND industry exposure from company history.
 
-Resume: {json.dumps(resume)}
-Job Description: {json.dumps(jd)}
+Resume Summary:
+- Title: {resume.get('current_job_title')}
+- Experience: {resume.get('experience_years')} years
+- Company Background: {company_history}
+- Education: {resume.get('education')}
+- Skills: {resume.get('skills', [])}
+
+Job Description:
+- Role: {jd.get('jd_job_title')}
+- Required Skills: {jd.get('required_skills', [])}
 
 Return ONLY valid JSON:
-{{"match_score": NUMBER, "matching_skills": ["list 3-5 matched skills"], "missing_skills": ["list 2-3 gaps"], "synonym_matches": {{"resume_skill":"matches_jd_skill"}}, "strengths": ["2-3 relevant strengths"]}}"""
+{{"match_score": NUMBER, "matching_skills": ["list 3-5 matched skills"], "missing_skills": ["list 2-3 gaps"], "synonym_matches": {{"resume_skill":"matches_jd_skill"}}, "strengths": ["2-3 relevant strengths including industry expertise if applicable"]}}"""
     result = call_llm(prompt)
     parsed = parse_json_response(result)
     if "match_score" in parsed:
