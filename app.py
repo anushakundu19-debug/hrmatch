@@ -166,12 +166,27 @@ def quick_match_analysis(resume: Dict, jd: Dict) -> Dict:
     ULTRA-FAST screening. Returns only match_score.
     ~200 tokens. Determines if we do deeper analysis.
     """
-    prompt = f"""Score match on a scale of 0 to 100. Return ONLY JSON: {{"match_score": NUMBER}}
-Where 0 = no match, 100 = perfect match.
-Resume skills: {resume.get('skills', [])}
-JD skills: {jd.get('required_skills', [])}
-Resume title: {resume.get('current_job_title')}
-JD title: {jd.get('jd_job_title')}"""
+    prompt = f"""Score resume match on a scale of 0 to 100. Return ONLY JSON: {{"match_score": NUMBER}}
+
+Scoring guide:
+- 80-100: Direct match in role/skills. Ready to hire.
+- 60-79: Good fit. Has most required skills or strong related experience. Trainable.
+- 40-59: Moderate fit. Some relevant skills/experience. Would need training.
+- 20-39: Weak fit. Different field but has transferable skills.
+- 0-19: No relevant background.
+
+Consider:
+- Transferable skills (management, communication, problem-solving apply across roles)
+- Years of experience in related domains
+- Soft skills like leadership, organization, people management
+- Education and certifications
+
+Resume Skills: {resume.get('skills', [])}
+Resume Experience: {resume.get('experience_years', 0)} years as {resume.get('current_job_title')}
+Resume Education: {resume.get('education')}
+
+Required Skills: {jd.get('required_skills', [])}
+Target Role: {jd.get('jd_job_title')}"""
     result = call_llm(prompt)
     parsed = parse_json_response(result)
     if "match_score" in parsed:
@@ -185,11 +200,22 @@ def comprehensive_analysis(resume: Dict, jd: Dict) -> Dict:
     Returns: match_score, matching_skills, missing_skills, strengths, synonyms.
     ~600 tokens.
     """
-    prompt = f"""Analyze resume vs JD. Return match_score as a NUMBER from 0 to 100. Concise JSON.
-Resume: {json.dumps(resume)}
-JD: {json.dumps(jd)}
+    prompt = f"""Analyze resume vs job description. Be fair in scoring. Return JSON with match_score (0-100).
 
-{{"match_score": 0, "matching_skills": ["max 5"], "missing_skills": ["max 5"], "synonym_matches": {{"skill":"match"}}, "strengths": ["max 3"]}}"""
+Scoring Rubric:
+- 80-100: Excellent fit. Has most/all required skills. Direct experience match.
+- 60-79: Strong fit. Has key skills. Some gaps but easily trainable.
+- 40-59: Fair fit. Foundational skills present. Can learn on the job.
+- 20-39: Possible fit. Transferable skills from other domain.
+- 0-19: Poor fit. No relevant background.
+
+For each score tier, explain matching skills and gaps honestly but fairly.
+
+Resume: {json.dumps(resume)}
+Job Description: {json.dumps(jd)}
+
+Return ONLY valid JSON:
+{{"match_score": NUMBER, "matching_skills": ["list 3-5 matched skills"], "missing_skills": ["list 2-3 gaps"], "synonym_matches": {{"resume_skill":"matches_jd_skill"}}, "strengths": ["2-3 relevant strengths"]}}"""
     result = call_llm(prompt)
     parsed = parse_json_response(result)
     if "match_score" in parsed:
